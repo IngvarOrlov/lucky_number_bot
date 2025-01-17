@@ -4,21 +4,19 @@ from aiogram.types import Message
 from aiogram.filters import Command, CommandStart
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+# import logging
 
 from config import BOT_TOKEN, ATTEMPTS
 from model import Base, User
+from config import log_setup
 
+logger = log_setup(__name__)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-engine = create_engine('sqlite:///db.sqlite3', echo=True)
-# user = {'in_game': False,
-#         'secret_number': None,
-#         'attempts': None,
-#         'total_games': 0,
-#         'wins': 0}
+engine = create_engine('sqlite:///db.sqlite3', echo=False)
 
-def get_user(message, session)->User:
+def get_user(message, session: Session) -> User:
     user = session.get(User, message.from_user.id)
     if not user:
         user = User(id=message.from_user.id, wins=0, total_games=0, in_game=False, attempts=0, secret_number=0)
@@ -28,7 +26,8 @@ def get_user(message, session)->User:
 
 
 @dp.message(CommandStart())
-async def start_command(message: Message):
+async def start_command(message: Message) -> None:
+    logger.warning(f'User.id={message.from_user.id}, action=Start Command')
     with Session(engine) as session:
         user = get_user(message, session)
 
@@ -44,8 +43,10 @@ async def start_command(message: Message):
         )
         session.commit()
 
+
 @dp.message(Command(commands='help'))
-async def help_command(message: Message):
+async def help_command(message: Message) -> None:
+    logger.warning(f'User.id={message.from_user.id}, action=Help Command')
     await message.answer('Это простая игра, я загадываю число от 1 до 50, а ты угадываешь.\n'
                          'У тебя есть 5 попыток, если не получится то можно сыграть еще\n'
                          '\nДоступные команды:\n /start - начать игру\n /help - правила\n/cancel - выйти из игры\n'
@@ -53,7 +54,8 @@ async def help_command(message: Message):
 
 
 @dp.message(lambda x: x.text and x.text.isdigit())
-async def numbers_command(message: Message):
+async def numbers_command(message: Message) -> None:
+    logger.warning(f'User.id={message.from_user.id}, User_input_number={message.text}')
     with Session(engine) as session:
         user = get_user(message, session)
         num = int(message.text)
@@ -81,18 +83,41 @@ async def numbers_command(message: Message):
                 f'Загаднное число {['меньше', 'больше'][int(message.text) < user.secret_number]} чем {message.text}')
             session.commit()
 
+
 @dp.message(Command(commands='stat'))
-async def stat_command(message: Message):
+async def stat_command(message: Message) -> None:
+    logger.warning(f'User.id={message.from_user.id}, action=Stat Command')
     with Session(engine) as session:
         user = get_user(message, session)
         await message.answer(
             f'Всего игр: {user.total_games}\nПобед: {user.wins}'
-            f'\nУдачных попыток: {round(100 // user.total_games  * user.wins)}%')
+            f'\nУдачных попыток: {round(100 // user.total_games * user.wins)}%')
+
+
+@dp.message(lambda x: x.text.lower() in ('да', 'еще', 'давай') )
+async def accapt_to_play_command(message: Message) -> None:
+    logger.warning(f'User.id={message.from_user.id}, action=Accept_to_play Command')
+    with Session(engine) as session:
+        user = get_user(message, session)
+
+        if user.in_game:
+            await message.answer('Вы уже в игре')
+        else:
+            user.in_game = True
+            user.secret_number = randint(1, 50)
+            user.attempts = ATTEMPTS
+        await message.answer(
+            'Супер! Начинаем игру!\nЯ загадал число от 1 до 50, попробуй угадать\n'
+            'У тебя есть 5 попыток'
+        )
+        session.commit()
 
 
 @dp.message()
-async def other_command(message: Message):
+async def other_command(message: Message) -> None:
+    logger.warning(f'User.id={message.from_user.id}, action=Other Command, text={message.text}')
     await message.answer('Используйте комманду /help, чтобы посмотреть что я умею')
+
 
 
 if __name__ == '__main__':
