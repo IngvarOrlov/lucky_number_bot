@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from config import BOT_TOKEN, ATTEMPTS
 from model import Base, User
 from config import log_setup
+from filters import FilterNums
 
 logger = log_setup(__name__)
 
@@ -23,7 +24,6 @@ def get_user(message, session: Session) -> User:
         session.add(user)
         session.commit()
     return user
-
 
 @dp.message(CommandStart())
 async def start_command(message: Message) -> None:
@@ -83,6 +83,35 @@ async def numbers_command(message: Message) -> None:
                 f'Загаднное число {['меньше', 'больше'][int(message.text) < user.secret_number]} чем {message.text}')
             session.commit()
 
+@dp.message(FilterNums())
+async def number_in_message_command(message: Message, num: int) -> None:
+    logger.warning(f'User.id={message.from_user.id}, User_input_text={message.text}')
+    with Session(engine) as session:
+        user = get_user(message, session)
+        num = num
+        if not user.in_game:
+            await message.answer("Для того чтобы начать игру, используй команду /start")
+        elif num < 1 or num > 50:
+            await message.answer('Загадано число от 1 до 50')
+        elif num == user.secret_number:
+            user.in_game = False
+            user.total_games += 1
+            user.wins += 1
+            user.attempts == 0
+            await message.answer(f'Ура Вы угадали!\nПоздравляю с победой!\nСыграем еще?')
+            session.commit()
+        elif user.attempts == 1:
+            user.attempts = 0
+            user.total_games += 1
+            user.in_game = False
+            await message.answer(
+                f'В этот раз не получилось. Было загадано число {user.secret_number}\nСыграем еще?')
+            session.commit()
+        elif user.attempts > 1:
+            user.attempts -= 1
+            await message.answer(
+                f'Загаднное число {['меньше', 'больше'][num < user.secret_number]} чем {num}')
+            session.commit()
 
 @dp.message(Command(commands='stat'))
 async def stat_command(message: Message) -> None:
@@ -94,7 +123,7 @@ async def stat_command(message: Message) -> None:
             f'\nУдачных попыток: {round(100 // user.total_games * user.wins)}%')
 
 
-@dp.message(lambda x: x.text.lower() in ('да', 'еще', 'давай') )
+@dp.message(lambda x: x.text.lower() in ('да', 'еще', 'давай', 'yes') )
 async def accapt_to_play_command(message: Message) -> None:
     logger.warning(f'User.id={message.from_user.id}, action=Accept_to_play Command')
     with Session(engine) as session:
